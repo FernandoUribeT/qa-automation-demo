@@ -1,0 +1,113 @@
+name: qa
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Pruebas funcionales: API (rápidas, en memoria) e interfaz (Selenium/Chrome).
+  # Responden "¿funciona?".
+  # ---------------------------------------------------------------------------
+  pruebas:
+    name: Pruebas funcionales
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Instalar Python
+        run: uv python install 3.13
+
+      # --frozen obliga a respetar uv.lock: si no coincide con pyproject.toml
+      # falla, en lugar de instalar versiones distintas a las probadas en local.
+      - name: Instalar dependencias
+        run: uv sync --frozen --dev
+
+      # El runner de ubuntu-latest ya trae Chrome instalado. Se deja constancia
+      # de la versión en el log: si un día una prueba empieza a fallar sin que
+      # el código haya cambiado, lo primero a revisar es si Chrome cambió.
+      - name: Versión de Chrome en el runner
+        run: google-chrome --version
+
+      - name: Ejecutar pruebas
+        run: uv run pytest -v --junitxml=reporte-pruebas.xml
+
+      # if: always() es deliberado. Sin él, este paso se saltaría justo cuando
+      # las pruebas fallaron, que es cuando más se necesita el reporte.
+      - name: Publicar reporte de pruebas
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reporte-pruebas
+          path: reporte-pruebas.xml
+
+  # ---------------------------------------------------------------------------
+  # Prueba de carga. Responde una pregunta distinta: "¿aguanta?".
+  # Va en un job aparte porque tarda más y porque su fallo significa otra cosa:
+  # el servicio puede ser correcto y aun así ser demasiado lento.
+  # ---------------------------------------------------------------------------
+  carga:
+    name: Prueba de carga
+    runs-on: ubuntu-latest
+    # Solo tiene sentido medir rendimiento de algo que ya se sabe correcto.
+    needs: pruebas
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Instalar Python
+        run: uv python install 3.13
+
+      - name: Instalar dependencias
+        run: uv sync --frozen --dev
+
+      - name: Levantar el servicio
+        run: |
+          uv run uvicorn api.main:app --host 127.0.0.1 --port 8000 --log-level warning &
+          # Esperar a que responda en vez de dormir una cantidad fija: si
+          # arranca en 200 ms no se pierde tiempo, y si tarda más no falla.
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8000/ > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "el servicio no respondió a tiempo"
+          exit 1
+
+      # Los umbrales son la parte que convierte esto en una prueba y no en una
+      # simple medición:
+      #   --check-fail-ratio 0.01  falla si más del 1% de las peticiones falla
+      #   --check-avg-response-time 500  falla si el promedio supera 500 ms
+      # Sin umbrales, Locust siempre "pasa" y el job no protege de nada.
+      - name: Ejecutar prueba de carga
+        run: |
+          uv run locust -f load/locustfile.py \
+            --host http://127.0.0.1:8000 \
+            --headless \
+            --users 50 \
+            --spawn-rate 10 \
+            --run-time 30s \
+            --csv reporte-carga \
+            --check-fail-ratio 0.01 \
+            --check-avg-response-time 500
+
+      - name: Publicar reporte de carga
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reporte-carga
+          path: reporte-carga*.csv

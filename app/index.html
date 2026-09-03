@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Validación de RFC</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 30rem; margin: 3rem auto; padding: 0 1rem; }
+  label { display: block; margin-bottom: .4rem; font-weight: 600; }
+  input { width: 100%; padding: .5rem; font-size: 1rem; }
+  button { margin-top: .8rem; padding: .5rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  button[disabled] { opacity: .5; cursor: progress; }
+  .mensaje { margin-top: 1rem; padding: .7rem; border-radius: 4px; }
+  .error { background: #fde8e8; color: #8a1c1c; }
+  .exito { background: #e6f6ea; color: #14532d; }
+</style>
+</head>
+<body>
+
+<h1>Validación de RFC</h1>
+
+<form id="formulario">
+  <label for="rfc">RFC del proveedor</label>
+  <input type="text" id="rfc" name="rfc" autocomplete="off" placeholder="ABC123456XY0">
+  <button type="submit" id="validar">Validar</button>
+</form>
+
+<!-- El contenedor del resultado NO existe hasta que la API responde.
+     Es a propósito: obliga a que la prueba espere a que aparezca, en lugar
+     de asumir que ya está en el DOM. -->
+<div id="salida"></div>
+
+<script>
+  const form = document.getElementById('formulario');
+  const boton = document.getElementById('validar');
+  const salida = document.getElementById('salida');
+
+  form.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+    const rfc = document.getElementById('rfc').value;
+
+    salida.innerHTML = '';
+    boton.disabled = true;   // evita que un doble clic dispare dos peticiones
+
+    try {
+      const respuesta = await fetch('/api/validar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rfc: rfc })
+      });
+
+      const datos = await respuesta.json();
+      const clase = datos.valido ? 'exito' : 'error';
+
+      salida.innerHTML =
+        '<div class="mensaje ' + clase + '" id="resultado">' + datos.mensaje + '</div>';
+    } catch (e) {
+      salida.innerHTML =
+        '<div class="mensaje error" id="resultado">No se pudo contactar al servicio.</div>';
+    } finally {
+      boton.disabled = false;
+    }
+  });
+</script>
+
+</body>
+</html>
