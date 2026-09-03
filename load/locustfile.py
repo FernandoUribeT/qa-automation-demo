@@ -12,7 +12,48 @@ Ejecución sin interfaz (para CI, con umbrales que hacen fallar la corrida):
         --headless --users 50 --spawn-rate 10 --run-time 30s
 """
 
-from locust import HttpUser, between, task
+from locust import HttpUser, between, events, task
+
+# Umbrales de aceptación. Viven aquí, en código versionado, y no como
+# argumentos sueltos en la línea de comandos del CI: así se revisan en un pull
+# request como cualquier otro cambio, y quedan a la vista de quien lea el
+# proyecto.
+#
+# Sin umbrales, una prueba de carga siempre "pasa": mide y reporta, pero no
+# protege de nada. El umbral es lo que la convierte en prueba.
+MAX_PROPORCION_DE_FALLOS = 0.01   # 1% de las peticiones
+MAX_P95_MS = 500                  # 95 de cada 100 usuarios por debajo de esto
+
+
+@events.quitting.add_listener
+def _verificar_umbrales(environment, **_):
+    """Decide el código de salida del proceso al terminar la corrida.
+
+    Se mide el percentil 95 y no el promedio: el promedio esconde la cola. Un
+    servicio con promedio de 2 ms puede tener un 1% de usuarios esperando 3
+    segundos, y son justo esos los que se van.
+    """
+    stats = environment.stats.total
+    p95 = stats.get_response_time_percentile(0.95) or 0
+
+    problemas = []
+    if stats.fail_ratio > MAX_PROPORCION_DE_FALLOS:
+        problemas.append(
+            f"proporción de fallos {stats.fail_ratio:.2%} "
+            f"(máximo {MAX_PROPORCION_DE_FALLOS:.2%})"
+        )
+    if p95 > MAX_P95_MS:
+        problemas.append(f"p95 de {p95:.0f} ms (máximo {MAX_P95_MS} ms)")
+
+    if problemas:
+        for problema in problemas:
+            print(f"UMBRAL EXCEDIDO: {problema}")
+        environment.process_exit_code = 1
+    else:
+        print(
+            f"Umbrales cumplidos: fallos {stats.fail_ratio:.2%}, p95 {p95:.0f} ms"
+        )
+        environment.process_exit_code = 0
 
 # Tráfico realista: la mayoría de los RFC que llegan son correctos, pero
 # siempre entra una proporción de basura. Medir solo con datos válidos daría

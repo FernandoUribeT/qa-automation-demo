@@ -88,11 +88,10 @@ jobs:
           echo "el servicio no respondió a tiempo"
           exit 1
 
-      # Los umbrales son la parte que convierte esto en una prueba y no en una
-      # simple medición:
-      #   --check-fail-ratio 0.01  falla si más del 1% de las peticiones falla
-      #   --check-avg-response-time 500  falla si el promedio supera 500 ms
-      # Sin umbrales, Locust siempre "pasa" y el job no protege de nada.
+      # Los umbrales que deciden si esta corrida pasa o falla están definidos
+      # en load/locustfile.py, no aquí: viven en código versionado, se revisan
+      # en un pull request, y no dependen de que alguien recuerde pasar los
+      # argumentos correctos.
       - name: Ejecutar prueba de carga
         run: |
           uv run locust -f load/locustfile.py \
@@ -101,9 +100,7 @@ jobs:
             --users 50 \
             --spawn-rate 10 \
             --run-time 30s \
-            --csv reporte-carga \
-            --check-fail-ratio 0.01 \
-            --check-avg-response-time 500
+            --csv reporte-carga
 
       - name: Publicar reporte de carga
         if: always()
